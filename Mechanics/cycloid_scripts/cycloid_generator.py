@@ -106,15 +106,18 @@ for angle in range(0,361):
     plt.pause(0.0001)
 
 # draw pins
-pin_verts = []
+#TODO:
+# base_circle = plt.Circle((0, 0), pin_circle_radius)
+# axes.add_patch(base_circle)
+pin_verts_lists = []
 for pin_angle in np.linspace(0,360,num=number_of_pins+1):
-    pincircle = plt.Circle(
-        (pin_circle_radius*cos(pin_angle)+rolling_circle_radius - contraction,
-        pin_circle_radius*sin(pin_angle))
-        ,pin_radius
-        )
+    pincircle = plt.Circle((pin_circle_radius*cos(pin_angle)+rolling_circle_radius - contraction, 
+                            pin_circle_radius*sin(pin_angle))
+                           ,pin_radius)
+
     axes.add_patch(pincircle)
-    pin_verts.extend(numpyCoordndarry_to_python(pincircle.get_verts()))
+    # pin_verts.extend(numpyCoordndarry_to_python(pincircle.get_verts()))
+    pin_verts_lists.append(pincircle.get_verts())
 
 # polygon to hold the offset epicycloid
 offset_epicycloid = plt.Polygon(offset(pin_radius,epicycloid_points), fill=False, closed=True)  #CHANGED: I changed closed to True
@@ -123,7 +126,8 @@ axes.add_patch(offset_epicycloid)
 
 ### My code
 # get coordinates of cycloid
-cycloid_verts = numpyCoordndarry_to_python(offset_epicycloid.get_verts())
+cycloid_verts = offset_epicycloid.get_verts()
+# cycloid_verts = numpyCoordndarry_to_python(offset_epicycloid.get_verts())
 
 def coords_to_dxf(version: str, verts: list[list[float, float]], file_name: str) -> None:
     '''
@@ -150,16 +154,36 @@ def coord_to_dxf2(version: str, verts: list[list[float, float]], file_name: str)
     doc.units = ezdxf.units.MM
 
     msp = doc.modelspace()
-    print(verts, 'first')
+    prev_coord = verts[0]
     for vert in verts:
         msp.add_line(prev_coord, vert)
         prev_coord = vert
 
     doc.saveas(file_name)
 
-all_verts = deepcopy(cycloid_verts)
-all_verts.extend(pin_verts)
-coord_to_dxf2('R2010', all_verts, '../new_dxf.dxf')
+def coords_to_dxf2(version: str, verts_list: list[list[list[float, float]]], file_name: str) -> None:
+    '''
+    converts verts to dxf file
+
+    :param verts: the list of coordinates to get exported
+    :param file_name: the dxf filename to be exported
+    '''
+    doc = ezdxf.new(version)
+    doc.units = ezdxf.units.MM
+
+    msp = doc.modelspace()
+
+    for verts in verts_list:
+        prev_coord = verts[0]
+        for vert in verts:
+            msp.add_line(prev_coord, vert)
+            prev_coord = vert
+
+    doc.saveas(file_name)
+
+
+coord_to_dxf2('R2010', cycloid_verts, '../cycloid.dxf')
+coords_to_dxf2('R2010', pin_verts_lists, '../pins.dxf')
 
 # coords_to_dxf(verts, '../cycloid2.dxf')
 #TODO: add the pins coordinates to the dxf file
