@@ -1,9 +1,23 @@
+import numpy
 import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.backend_bases import MouseButton
 from shapely.geometry.polygon import LinearRing
 import time
 import ezdxf
+
+from pysvg.filter import *
+from pysvg.gradient import *
+from pysvg.linking import *
+from pysvg.script import *
+from pysvg.shape import *
+from pysvg.structure import *
+from pysvg.style import *
+from pysvg.text import *
+from pysvg.builders import *
+from pysvg.parser import parse
+
+from copy import deepcopy
 
 blank = [[0,0]]
 mm_to_inch = 1/25.4
@@ -39,6 +53,12 @@ def setup_plot(amount):
 def end_plot():
     plt.ioff()
     plt.show(block=True)
+
+def numpyCoordndarry_to_python(verts) -> list[list[float, float]]:
+    '''
+    converts the numpy array of two coordinates array to python builtins
+    '''
+    return list( [float(num) for num in vert] for vert in verts )
 
 pin_radius = 2.5
 pin_circle_radius = 50 
@@ -81,11 +101,12 @@ for angle in range(0,361):
     rolling_circle_line.set_ydata((y,point_y))
     
     epicycloid_points.append([point_x,point_y])
-    epicycloid.set_xy(epicycloid_points)  
+    epicycloid.set_xy(epicycloid_points)
 
     plt.pause(0.0001)
 
 # draw pins
+pin_verts = []
 for pin_angle in np.linspace(0,360,num=number_of_pins+1):
     pincircle = plt.Circle(
         (pin_circle_radius*cos(pin_angle)+rolling_circle_radius - contraction,
@@ -93,6 +114,7 @@ for pin_angle in np.linspace(0,360,num=number_of_pins+1):
         ,pin_radius
         )
     axes.add_patch(pincircle)
+    pin_verts.extend(numpyCoordndarry_to_python(pincircle.get_verts()))
 
 # polygon to hold the offset epicycloid
 offset_epicycloid = plt.Polygon(offset(pin_radius,epicycloid_points), fill=False, closed=True)  #CHANGED: I changed closed to True
@@ -101,10 +123,7 @@ axes.add_patch(offset_epicycloid)
 
 ### My code
 # get coordinates of cycloid
-verts = offset_epicycloid.get_verts()
-
-# convert numpy objects to normal python objects (just so that I can freely use them)
-# verts = list( [float(num) for num in vert] for vert in verts )
+cycloid_verts = numpyCoordndarry_to_python(offset_epicycloid.get_verts())
 
 def coords_to_dxf(version: str, verts: list[list[float, float]], file_name: str) -> None:
     '''
@@ -118,8 +137,29 @@ def coords_to_dxf(version: str, verts: list[list[float, float]], file_name: str)
     msp = doc.modelspace() # add new entities to the modelspace
     msp.add_polyline2d(verts) # add a LINE entity
 
-    doc.saveas(file_name) 
+    doc.saveas(file_name)
 
+def coord_to_dxf2(version: str, verts: list[list[float, float]], file_name: str) -> None:
+    '''
+    converts verts to dxf file
+
+    :param verts: the list of coordinates to get exported
+    :param file_name: the dxf filename to be exported
+    '''
+    doc = ezdxf.new(version)
+    doc.units = ezdxf.units.MM
+
+    msp = doc.modelspace()
+    print(verts, 'first')
+    for vert in verts:
+        msp.add_line(prev_coord, vert)
+        prev_coord = vert
+
+    doc.saveas(file_name)
+
+all_verts = deepcopy(cycloid_verts)
+all_verts.extend(pin_verts)
+coord_to_dxf2('R2010', all_verts, '../new_dxf.dxf')
 
 # coords_to_dxf(verts, '../cycloid2.dxf')
 #TODO: add the pins coordinates to the dxf file
@@ -129,21 +169,13 @@ def coords_to_dxf(version: str, verts: list[list[float, float]], file_name: str)
 # for version in versions:
 #     coords_to_dxf(version, verts, f"{version}.dxf")
 
-from pysvg.filter import *
-from pysvg.gradient import *
-from pysvg.linking import *
-from pysvg.script import *
-from pysvg.shape import *
-from pysvg.structure import *
-from pysvg.style import *
-from pysvg.text import *
-from pysvg.builders import *
-from pysvg.parser import parse
+
 
 def coords_to_svg(verts: list[list[float, float]], file_name: str) -> None:
     '''
     converts set of coords to svg file
     '''
+
     oh = ShapeBuilder()
     s = Svg('test')
     
@@ -154,7 +186,7 @@ def coords_to_svg(verts: list[list[float, float]], file_name: str) -> None:
 
     s.save(file_name)
 
-coords_to_svg(verts, "../cycloid.svg")
+# coords_to_svg(verts, "../cycloid.svg")
 
 
 end_plot()
