@@ -104,24 +104,58 @@ axes.add_patch(offset_epicycloid)
 verts = offset_epicycloid.get_verts()
 
 # convert numpy objects to normal python objects (just so that I can freely use them)
-verts = list( [float(num) for num in vert] for vert in verts )
+# verts = list( [float(num) for num in vert] for vert in verts )
 
-def coords_to_dxf(verts: list[list[float, float]], file_name: str) -> None:
+def coords_to_dxf(version: str, verts: list[list[float, float]], file_name: str) -> None:
     '''
     converting list of coordinates of cycloid to dxf file
 
     :param verts: the list of coordinates to get exported
     :param file_name: the dxf filename to be exported
     '''
-    doc = ezdxf.new('R2010') # create a new DXF drawing in R2010 fromat 
+    doc = ezdxf.new(version) # create a new DXF drawing in R2010 fromat 
 
     msp = doc.modelspace() # add new entities to the modelspace
     msp.add_polyline2d(verts) # add a LINE entity
 
     doc.saveas(file_name) 
 
-coords_to_dxf(verts, 'cycloid.dxf')
+
+# coords_to_dxf(verts, '../cycloid2.dxf')
 #TODO: add the pins coordinates to the dxf file
+
+# versions = ['R12', 'R2000', 'R2004', 'R2007', 'R2010', 'R2013', 'R2018']
+
+# for version in versions:
+#     coords_to_dxf(version, verts, f"{version}.dxf")
+
+from pysvg.filter import *
+from pysvg.gradient import *
+from pysvg.linking import *
+from pysvg.script import *
+from pysvg.shape import *
+from pysvg.structure import *
+from pysvg.style import *
+from pysvg.text import *
+from pysvg.builders import *
+from pysvg.parser import parse
+
+def coords_to_svg(verts: list[list[float, float]], file_name: str) -> None:
+    '''
+    converts set of coords to svg file
+    '''
+    oh = ShapeBuilder()
+    s = Svg('test')
+    
+    prev_coord = verts[0]
+    for coord in verts:
+        s.addElement(oh.createLine(prev_coord[0], prev_coord[1], coord[0], coord[1]))
+        prev_coord = coord
+
+    s.save(file_name)
+
+coords_to_svg(verts, "../cycloid.svg")
+
 
 end_plot()
 
