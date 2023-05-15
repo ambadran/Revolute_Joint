@@ -1339,11 +1339,16 @@ class Cycloid:
         self.pin_count = pin_count
         self.contraction = contraction
         self.pin_cycloid_tolerance = pin_cycloid_tolerance
+        # self.roller_pin_count  #TODO:
+        # self.roller_pin_radius  #TODO:
         
         ### automatically defined variables
         self.rolling_circle_radius = round(self.pin_base_radius/self.pin_count, 6)
         self.reduction_ratio = pin_count - 1
         self.cycloid_base_circle_radius = round(self.rolling_circle_radius*self.reduction_ratio, 6)
+        # self.eccentricity  #TODO:
+        # self.cycloid_roller_pin_hole_radius = self.roller_pin_radius + 2 * self.eccentricity  #TODO:
+        # self.cycloid_center_roller_pin_distance  #TODO:
 
     @property
     def coordinates(self) -> list[Coordinate]:
@@ -1397,6 +1402,27 @@ class Cycloid:
             pin_coordinates.append(Coordinate(x_coord, y_coord))
 
         return pin_coordinates
+
+    @property
+    def cycloid_base_circle_coordinate(self) -> Coordinate:
+        '''
+
+        '''
+        pass  #TODO:
+
+    @property
+    def pin_base_coordinate(self) -> Coordinate:
+        '''
+
+        '''
+        pass  #TODO:
+
+    @property
+    def roller_pin_coordinates(self) -> list[Coordinate]:
+        '''
+
+        '''
+        pass  #TODO:
 
     def export_cyloid_dxf(self, version, file_name) -> None:
         '''
