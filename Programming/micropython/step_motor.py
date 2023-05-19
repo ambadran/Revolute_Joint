@@ -45,3 +45,5 @@ class Motor:
 
         self.dir.toggle()
 
+
+motor = Motor()
