@@ -629,6 +629,8 @@ class CycloidalDrive:
         # The pins
         coords_list = self.pin_coordinates
         for coord in coords_list:
+            #NOTE Although the pins are part of the pin base object, its existence is in the same height as the layer2: the cycloid
+            coord.z += self.layer_thickness
             msp.add_circle(coord, self.pin_radius)
         
         ### Layer 2: The Cycloid
@@ -677,6 +679,8 @@ class CycloidalDrive:
             center.z += self.layer_thickness*2
             msp.add_circle(center, radius)
 
+        # Output Screw holes 
+        #TODO:
 
         doc.saveas(file_name)
 
@@ -695,7 +699,7 @@ if __name__ == '__main__':
     # Layer 3: Roller Pin Output Shaft
     roller_pin_count = 4
     roller_pin_radius = 5
-    roller_pin_tolerance = 0.2  #IMP tobe tested
+    roller_pin_tolerance = -0.2  # radius-wise, will be added to roller pins NOT roller pin holes
 
     # Layer 4: Cover
 
