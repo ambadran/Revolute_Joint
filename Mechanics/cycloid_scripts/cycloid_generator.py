@@ -418,6 +418,7 @@ class CycloidalDrive:
     '''
     class to generate, visualize, export the cycloidal drive shape itself and other parts needed to create a cyloidal gear reduction system
     '''
+    MINIMUM_WALL_LENGTH = 3  # mm
     def __init__(self, pin_radius: float, pin_base_radius: float, pin_count: int, contraction: int, 
                  pin_cycloid_tolerance: float, roller_pin_count: int, roller_pin_radius: float,  roller_pin_tolerance: float,
                  bearing_outer: float, bearing_inner: float, bearing_outer_tolerance: float, bearing_inner_tolerance: float,  
@@ -454,7 +455,7 @@ class CycloidalDrive:
         self.reduction_ratio = pin_count - 1
         self.cycloid_base_circle_radius = round(self.rolling_circle_radius*self.reduction_ratio, 6)
         self.eccentricity = Edge(self.pin_base_center, self.cycloid_center, None).absolute_length
-        self.roller_pin_hole_radius = round(self.roller_pin_radius + 2 * self.eccentricity, 5)
+        self.roller_pin_hole_radius = round((self.roller_pin_radius*2 + 2*self.eccentricity)/2, 5)
 
     @property
     def pin_base_center(self) -> Coordinate:
@@ -525,7 +526,7 @@ class CycloidalDrive:
         return offseted_coordinates
 
     @property
-    def cycloid_roller_pins_coordinates(self) -> list[Coordinate]:
+    def roller_pin_holes_centers(self) -> list[Coordinate]:
         '''
         :return: list of center of the roller pin circles
         '''
@@ -534,13 +535,44 @@ class CycloidalDrive:
         # it will be the midpoint of distance {roller_pin_hole_possible_area} 
         # between ( bearing_outer+bearing_outer_tolerance )
         # and closes point from cycloid coordinates to center of cycloid
+        cycloid_center = self.cycloid_center
+        cycloid_coordinates = self.cycloid_coordinates
+
+        min_distance = Edge(cycloid_center, cycloid_coordinates[0], None).absolute_length
+        for coord in cycloid_coordinates:
+            new_distance = Edge(cycloid_center, coord, None).absolute_length
+            if new_distance < min_distance:
+                min_distance = new_distance
+
         # the roller_pin_hole_possible_area must be greater than 
         # {2* ( roller_pin_hole_radius + (least possible 3dprinted wall thickness) )}
-        self.roller_pin_hole_possible_area: float
+        roller_pin_hole_available_length = min_distance - round((self.bearing_outer + self.bearing_outer_tolerance)/2, 5) 
+        roller_pin_hole_needed_length = round(2*self.roller_pin_hole_radius, 5) + 2*CycloidalDrive.MINIMUM_WALL_LENGTH
+        if roller_pin_hole_available_length < roller_pin_hole_needed_length:
+            raise ValueError('length needed to for roller pin holes is smaller than available length in cycloid\nMust make cycloid bigger or make bearing outer diamter smaller')
+
+        roller_pin_holes_centers_at_circle_radius = round((self.bearing_outer + self.bearing_outer_tolerance)/2, 5) + round(roller_pin_hole_available_length/2, 5)
 
         # find evenly distributed angles to put the center in according to self.roller_pin_count
-        return []
-        
+        roller_pin_hole_centers = []
+        for angle in range(0, 361, 360//self.roller_pin_count):
+            x = roller_pin_holes_centers_at_circle_radius*cos(angle)
+            y = roller_pin_holes_centers_at_circle_radius*sin(angle)
+
+            roller_pin_hole_centers.append(Coordinate(x, y, 0))
+
+        return roller_pin_hole_centers
+       
+    @property
+    def roller_pin_centers(self) -> list[Coordinate]:
+        '''
+        return list of coordinates of center of the roller pin in the 3rd layer of roller pin output shaft
+        '''
+        roller_pin_centers = self.roller_pin_holes_centers
+        for coord in roller_pin_centers:
+            coord.x += self.eccentricity
+
+        return roller_pin_centers
 
     def export_cyloid_dxf(self, version, file_name) -> None:
         '''
@@ -586,12 +618,12 @@ class CycloidalDrive:
         ### Layer 1: Base Pins
         # Center hole for ball bearing that will encompass the eccentric shaft
         center = self.pin_base_center
-        radius = self.bearing_outer + self.bearing_outer_tolerance
+        radius = round((self.bearing_outer + self.bearing_outer_tolerance)/2, 5)
         msp.add_circle(center, radius)
 
         # Eccentric Shaft
         center = self.pin_base_center
-        radius = self.bearing_inner + self.bearing_inner_tolerance
+        radius = round((self.bearing_inner + self.bearing_inner_tolerance)/2, 5)
         msp.add_circle(center, radius)
 
         # The pins
@@ -603,13 +635,13 @@ class CycloidalDrive:
         # Center hole for ball bearing that will encompass the eccentric shaft
         center = self.cycloid_center
         center.z += self.layer_thickness
-        radius = self.bearing_outer + self.bearing_outer_tolerance
+        radius = round((self.bearing_outer + self.bearing_outer_tolerance)/2, 5)
         msp.add_circle(center, radius)
 
         # Eccentric Shaft
         center = self.cycloid_center
         center.z += self.layer_thickness
-        radius = self.bearing_inner + self.bearing_inner_tolerance
+        radius = round((self.bearing_inner + self.bearing_inner_tolerance)/2, 5)
         msp.add_circle(center, radius)
 
         # The Cycloid itself
@@ -622,27 +654,26 @@ class CycloidalDrive:
             prev_coord = vert
 
         # Roller Pin Holes
-        for center in self.cycloid_roller_pins_coordinates:
-            center.x -= self.eccentricity
+        for center in self.roller_pin_holes_centers:
             center.z += self.layer_thickness
             msp.add_circle(center, self.roller_pin_hole_radius)
 
         ### Layer 3: Roller Pin Output Shaft
         # Center hole for ball bearing that will encompass the eccentric shaft
-        center = self.cycloid_center
+        center = self.pin_base_center
         center.z += self.layer_thickness*2
-        radius = self.bearing_outer + self.bearing_outer_tolerance
+        radius = round((self.bearing_outer + self.bearing_outer_tolerance)/2, 5)
         msp.add_circle(center, radius)
 
         # Eccentric Shaft
-        center = self.cycloid_center
+        center = self.pin_base_center
         center.z += self.layer_thickness*2
-        radius = self.bearing_inner + self.bearing_inner_tolerance
+        radius = round((self.bearing_inner + self.bearing_inner_tolerance)/2, 5)
         msp.add_circle(center, radius)
 
         # The Roller Pins
         radius = self.roller_pin_radius + self.roller_pin_tolerance
-        for center in self.cycloid_roller_pins_coordinates:
+        for center in self.roller_pin_centers:
             center.z += self.layer_thickness*2
             msp.add_circle(center, radius)
 
@@ -663,7 +694,6 @@ if __name__ == '__main__':
 
     # Layer 3: Roller Pin Output Shaft
     roller_pin_count = 4
-    #NOTE must make this smaller or the roller pin holes bigger to account for the 3d printing extra plastic tolerance problem
     roller_pin_radius = 5
     roller_pin_tolerance = 0.2  #IMP tobe tested
 
