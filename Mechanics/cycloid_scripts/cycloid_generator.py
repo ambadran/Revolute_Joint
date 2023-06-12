@@ -2,6 +2,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 import shapely
+from shapely import LinearRing
+from shapely import affinity
 import ezdxf
 from copy import deepcopy
 
@@ -16,7 +18,6 @@ def cos(angle: float) -> float:
     math.cos but takes in degrees
     '''
     return math.cos(math.radians(angle))
-
 
 @dataclass
 class Coordinate:
@@ -419,10 +420,10 @@ class CycloidalDrive:
     class to generate, visualize, export the cycloidal drive shape itself and other parts needed to create a cyloidal gear reduction system
     '''
     MINIMUM_WALL_LENGTH = 3  # mm
-    def __init__(self, pin_radius: float, pin_base_radius: float, pin_count: int, contraction: int, 
-                 pin_cycloid_tolerance: float, roller_pin_count: int, roller_pin_radius: float,  roller_pin_tolerance: float,
-                 bearing_outer: float, bearing_inner: float, bearing_outer_tolerance: float, bearing_inner_tolerance: float,  
-                 layer_thickness: float):
+    def __init__(self, pin_radius: float, pin_base_radius: float, pin_count: int, supported_pins: bool, contraction: int, 
+            pin_cycloid_tolerance: float, extra_cycloids: int, cycloid_spacer_thickness: float, roller_pin_count: int, 
+            roller_pin_radius: float, roller_pin_tolerance: float, bearing_outer: float, bearing_inner: float, 
+            bearing_outer_tolerance: float, bearing_inner_tolerance: float,  layer_thickness: float, inter_layer_distance: float):
         """
         constructor for cycloidal instance
 
@@ -435,9 +436,12 @@ class CycloidalDrive:
         self.pin_radius = pin_radius
         self.pin_base_radius = pin_base_radius
         self.pin_count = pin_count
+        self.supported_pins = supported_pins
 
         self.contraction = contraction
         self.pin_cycloid_tolerance = pin_cycloid_tolerance
+        self.extra_cycloids = extra_cycloids
+        self.cycloid_spacer_thickness = cycloid_spacer_thickness
 
         self.roller_pin_count = roller_pin_count
         self.roller_pin_radius = roller_pin_radius
@@ -449,6 +453,7 @@ class CycloidalDrive:
         self.bearing_inner_tolerance = bearing_inner_tolerance  #diameter
 
         self.layer_thickness = layer_thickness
+        self.inter_layer_distance = inter_layer_distance
         
         ### automatically defined variables
         self.rolling_circle_radius = round(self.pin_base_radius/self.pin_count, 6)
@@ -456,6 +461,11 @@ class CycloidalDrive:
         self.cycloid_base_circle_radius = round(self.rolling_circle_radius*self.reduction_ratio, 6)
         self.eccentricity = Edge(self.pin_base_center, self.cycloid_center, None).absolute_length
         self.roller_pin_hole_radius = round((self.roller_pin_radius*2 + 2*self.eccentricity)/2, 5)
+
+        ### DXF file
+        self.doc = ezdxf.new('R2010')
+        self.doc.units = ezdxf.units.MM
+        self.msp = self.doc.modelspace()
 
     @property
     def pin_base_center(self) -> Coordinate:
@@ -487,9 +497,16 @@ class CycloidalDrive:
     @property
     def cycloid_center(self) -> Coordinate:
         '''
-
+        Very important coordinate to create in-of-phase cycloids
         '''
         return Coordinate(0, 0, 0)
+
+    @property
+    def cycloid_outofphase_center(self) -> Coordinate:
+        '''
+        Very important coordinate to create out-of-phase cycloids
+        '''
+        return Coordinate(2*self.eccentricity, 0, 0)
 
     @property
     def cycloid_coordinates(self) -> list[Coordinate]:
@@ -525,9 +542,26 @@ class CycloidalDrive:
 
         return offseted_coordinates
 
+    @property 
+    def cycloid_outofphase_coordinates(self) -> list[Coordinate]:
+        '''
+        uses shapely to mirror self.cycloid_coordinates horizontally given self.cycloid_outofphase_center as center point
+        '''
+        shape = LinearRing(self.cycloid_coordinates)
+        center = (self.cycloid_center.x, self.cycloid_center.y)
+
+        rotated_shape = affinity.rotate(shape, 180, center)
+        translated_rotated_shape = affinity.translate(rotated_shape, xoff=2*self.eccentricity)
+
+        coords = list(translated_rotated_shape.coords)
+        coords = [Coordinate(coord[0], coord[1], 0) for coord in coords]
+
+        return coords
+
     @property
     def roller_pin_holes_centers(self) -> list[Coordinate]:
         '''
+        roller pin holes in in-phase cycloid
         :return: list of center of the roller pin circles
         '''
         # Find the circumference which the roller pin hole circles will lie on the cycloid itself
@@ -564,6 +598,18 @@ class CycloidalDrive:
         return roller_pin_hole_centers
        
     @property
+    def roller_pin_holes_outofphase_centers(self) -> list[Coordinate]:
+        '''
+        roller pin holes in in-phase cycloid
+        :return: list of center of the roller pin circles
+        '''
+        roller_pin_centers = self.roller_pin_holes_centers
+        for coord in roller_pin_centers:
+            coord.x += 2*self.eccentricity
+
+        return roller_pin_centers
+
+    @property
     def roller_pin_centers(self) -> list[Coordinate]:
         '''
         return list of coordinates of center of the roller pin in the 3rd layer of roller pin output shaft
@@ -578,15 +624,11 @@ class CycloidalDrive:
         '''
         exports dxf file for cycloid
         '''
-        doc = ezdxf.new(version)
-        doc.units = ezdxf.units.MM
-
-        msp = doc.modelspace()
         verts = list(self.cycloid_coordinates)
         # verts = self.coordinates
         prev_coord = verts[0]
         for vert in verts:
-            msp.add_line(prev_coord, vert)
+            self.msp.add_line(prev_coord, vert)
             prev_coord = vert
 
         doc.saveas(file_name)
@@ -595,127 +637,210 @@ class CycloidalDrive:
         '''
         exports pins as a dxf file
         '''
-        doc = ezdxf.new(version)
-        doc.units = ezdxf.units.MM
-
-        msp = doc.modelspace()
-
         coords_list = self.pin_coordinates
         for coord in coords_list:
-            msp.add_circle(coord, self.pin_radius)
+            self.msp.add_circle(coord, self.pin_radius)
 
         doc.saveas(file_name)
+
+    def add_base_pins_msp(self, layer_num: int) -> None:
+        '''
+        Layer 1: Base Pins
+        creates the geometry needed and adds it to the current msp
+
+        :param layer_num: controls the z coordinate according to current layer num
+        '''
+        # Center hole for ball bearing that will encompass the eccentric shaft
+        center = self.pin_base_center
+        center.z += self.layer_thickness*layer_num + self.inter_layer_distance*layer_num
+        radius = round((self.bearing_outer + self.bearing_outer_tolerance)/2, 5)
+        self.msp.add_circle(center, radius)
+
+        # Eccentric Shaft
+        center = self.pin_base_center
+        center.z += self.layer_thickness*layer_num + self.inter_layer_distance*layer_num
+        radius = round((self.bearing_inner + self.bearing_inner_tolerance)/2, 5)
+        self.msp.add_circle(center, radius)
+
+        # The pins
+        if self.supported_pins:
+            #iPad Notes, Cyloidal Drive Document, Pg-11
+            raise ValueError('Not implemented yet')
+
+
+        else:
+            coords_list = self.pin_coordinates
+            for coord in coords_list:
+                #NOTE Although the pins are part of the pin base object, 
+                # its existence is in the same height as the layer2: the cycloid
+                coord.z += self.layer_thickness*(layer_num+1) + self.inter_layer_distance*layer_num
+                self.msp.add_circle(coord, self.pin_radius)
+
+    def add_cycloid_msp(self, layer_num: int) -> None:
+        '''
+        Layer 2: The Cycloid
+
+        :param layer_num: controls the z coordinate according to current layer num
+        '''
+        # Center hole for ball bearing that will encompass the eccentric shaft
+        center = self.cycloid_center
+        center.z += self.layer_thickness*layer_num + self.inter_layer_distance*layer_num
+        radius = round((self.bearing_outer + self.bearing_outer_tolerance)/2, 5)
+        self.msp.add_circle(center, radius)
+
+        # Eccentric Shaft
+        center = self.cycloid_center
+        center.z += self.layer_thickness*layer_num + self.inter_layer_distance*layer_num
+        radius = round((self.bearing_inner + self.bearing_inner_tolerance)/2, 5)
+        self.msp.add_circle(center, radius)
+
+        # The Cycloid itself
+        verts = self.cycloid_coordinates
+        for vert in verts:
+            vert.z += self.layer_thickness*layer_num + self.inter_layer_distance*layer_num
+        prev_coord = verts[0]
+        for vert in verts:
+            self.msp.add_line(prev_coord, vert)
+            prev_coord = vert
+
+        # The Spacer Ring
+        #TODO:
+
+        # Roller Pin Holes
+        for center in self.roller_pin_holes_centers:
+            center.z += self.layer_thickness*layer_num + self.inter_layer_distance*layer_num
+            self.msp.add_circle(center, self.roller_pin_hole_radius)
+
+    def add_cycloid_outofphase_msp(self, layer_num: int) -> None:
+        '''
+        Layer 3+: add a cycloid out of phase of the original first cycloid
+
+        :param layer_num: controls the z coordinate according to current layer num
+        '''
+        # Center hole for ball bearing that will encompass the eccentric shaft
+        center = self.cycloid_outofphase_center
+        center.z += self.layer_thickness*layer_num + self.inter_layer_distance*layer_num
+        radius = round((self.bearing_outer + self.bearing_outer_tolerance)/2, 5)
+        self.msp.add_circle(center, radius)
+
+        # Eccentric Shaft
+        center = self.cycloid_outofphase_center
+        center.z += self.layer_thickness*layer_num + self.inter_layer_distance*layer_num
+        radius = round((self.bearing_inner + self.bearing_inner_tolerance)/2, 5)
+        self.msp.add_circle(center, radius)
+
+        # The Cycloid itself
+        verts = self.cycloid_outofphase_coordinates
+        for vert in verts:
+            vert.z += self.layer_thickness*layer_num + self.inter_layer_distance*layer_num
+        prev_coord = verts[0]
+        for vert in verts:
+            self.msp.add_line(prev_coord, vert)
+            prev_coord = vert
+
+        # Roller Pin Holes
+        for center in self.roller_pin_holes_outofphase_centers:
+            center.z += self.layer_thickness*layer_num + self.inter_layer_distance*layer_num
+            self.msp.add_circle(center, self.roller_pin_hole_radius)
+
+    def add_all_cycloids_msp(self, layer_num: int) -> None:
+        '''
+        According to self.extra_cycloids, will add the original first cycloid and 
+        all the extra ones in a original-then-outofphase manner
+
+        :param layer_num: controls the z coordinate according to current layer num
+        '''
+        add_cycloids_dict = {True: self.add_cycloid_msp, False: self.add_cycloid_outofphase_msp}
+        current_cycloid = True
+        for _ in range(1+self.extra_cycloids):
+            add_cycloids_dict[current_cycloid](layer_num)
+
+            layer_num += 1
+            current_cycloid = not current_cycloid
+
+    def add_roller_pin_output_shaft_msp(self, layer_num: int) -> None:
+        '''
+        Layer 3: Roller Pin Output Shaft
+
+        :param layer_num: controls the z coordinate according to current layer num
+        '''
+        # Center hole for ball bearing that will encompass the eccentric shaft
+        center = self.pin_base_center
+        center.z += self.layer_thickness*layer_num + self.inter_layer_distance*layer_num
+        radius = round((self.bearing_outer + self.bearing_outer_tolerance)/2, 5)
+        self.msp.add_circle(center, radius)
+
+        # Eccentric Shaft
+        center = self.pin_base_center
+        center.z += self.layer_thickness*layer_num + self.inter_layer_distance*layer_num
+        radius = round((self.bearing_inner + self.bearing_inner_tolerance)/2, 5)
+        self.msp.add_circle(center, radius)
+
+        # The Roller Pins
+        radius = self.roller_pin_radius + self.roller_pin_tolerance
+        for center in self.roller_pin_centers:
+            center.z += self.layer_thickness*layer_num + self.inter_layer_distance*layer_num
+            self.msp.add_circle(center, radius)
+
+        # Output Screw holes 
+        #TODO:
 
     def export_everything(self, version, file_name) -> None:
         '''
         exports cycloid and pins
         '''
-        doc = ezdxf.new(version)
-        doc.units = ezdxf.units.MM
+        ###IMP: layer_num starts from 0
 
-        msp = doc.modelspace()
+        # Layer 1:
+        self.add_base_pins_msp(layer_num = 0)
+       
+        # Layer 2: The Cycloid
+        self.add_all_cycloids_msp(layer_num = 1)
 
-        ### Layer 1: Base Pins
-        # Center hole for ball bearing that will encompass the eccentric shaft
-        center = self.pin_base_center
-        radius = round((self.bearing_outer + self.bearing_outer_tolerance)/2, 5)
-        msp.add_circle(center, radius)
+        # Layer 3: Roller Pin Output Shaft
+        self.add_roller_pin_output_shaft_msp(layer_num = 2+self.extra_cycloids)
 
-        # Eccentric Shaft
-        center = self.pin_base_center
-        radius = round((self.bearing_inner + self.bearing_inner_tolerance)/2, 5)
-        msp.add_circle(center, radius)
-
-        # The pins
-        coords_list = self.pin_coordinates
-        for coord in coords_list:
-            #NOTE Although the pins are part of the pin base object, its existence is in the same height as the layer2: the cycloid
-            coord.z += self.layer_thickness
-            msp.add_circle(coord, self.pin_radius)
-        
-        ### Layer 2: The Cycloid
-        # Center hole for ball bearing that will encompass the eccentric shaft
-        center = self.cycloid_center
-        center.z += self.layer_thickness
-        radius = round((self.bearing_outer + self.bearing_outer_tolerance)/2, 5)
-        msp.add_circle(center, radius)
-
-        # Eccentric Shaft
-        center = self.cycloid_center
-        center.z += self.layer_thickness
-        radius = round((self.bearing_inner + self.bearing_inner_tolerance)/2, 5)
-        msp.add_circle(center, radius)
-
-        # The Cycloid itself
-        verts = self.cycloid_coordinates
-        for vert in verts:
-            vert.z += self.layer_thickness  # putting it one layer above
-        prev_coord = verts[0]
-        for vert in verts:
-            msp.add_line(prev_coord, vert)
-            prev_coord = vert
-
-        # Roller Pin Holes
-        for center in self.roller_pin_holes_centers:
-            center.z += self.layer_thickness
-            msp.add_circle(center, self.roller_pin_hole_radius)
-
-        ### Layer 3: Roller Pin Output Shaft
-        # Center hole for ball bearing that will encompass the eccentric shaft
-        center = self.pin_base_center
-        center.z += self.layer_thickness*2
-        radius = round((self.bearing_outer + self.bearing_outer_tolerance)/2, 5)
-        msp.add_circle(center, radius)
-
-        # Eccentric Shaft
-        center = self.pin_base_center
-        center.z += self.layer_thickness*2
-        radius = round((self.bearing_inner + self.bearing_inner_tolerance)/2, 5)
-        msp.add_circle(center, radius)
-
-        # The Roller Pins
-        radius = self.roller_pin_radius + self.roller_pin_tolerance
-        for center in self.roller_pin_centers:
-            center.z += self.layer_thickness*2
-            msp.add_circle(center, radius)
-
-        # Output Screw holes 
-        #TODO:
-
-        doc.saveas(file_name)
+        self.doc.saveas(file_name)
 
 if __name__ == '__main__':
 
     ### User defined inputs in mm
-    # Layer 1: Pin Base
+    ### Layer 1: Pin Base
     pin_count = 10  # reduction ratio = pin_count -1
     pin_radius = 2.5
     pin_base_radius = 50  # The circumference at which the pins are placed on
+    supported_pins = False
 
-    # Layer 2: Cycloid
+    ### Layer 2: Cycloid
     contraction = 2
-    pin_cycloid_tolerance = 0.5
+    pin_cycloid_tolerance = 0.8  # it was 0.5
+    # circle strip to minimize friction between, this will be exactly cutting through the roller pin hole circles in the middle
+    cycloid_spacer_thickness = 3  # thickness of strip 2d
 
-    # Layer 3: Roller Pin Output Shaft
+    ### Layer 3+: out-of-phase cycloids
+    extra_cycloids = 1  # total cycloids = 1+extra_cycloids
+
+    ### Layer 4+: Roller Pin Output Shaft
     roller_pin_count = 4
     roller_pin_radius = 5
     roller_pin_tolerance = -0.2  # radius-wise, will be added to roller pins NOT roller pin holes
 
-    # Layer 4: Cover
+    ### Layer 5+: Cover
 
     # Inter-Layer Object: Eccentric Shaft
     bearing_outer = 32  # diameter
     bearing_inner = 20  # diameter
     bearing_outer_tolerance = 0.2  # Less Plastic by making extra diameter for center hole of ball bearing in each layer
     bearing_inner_tolerance = 0.15  # Extra plastic to the diameter of the eccentric shaft
+    inter_layer_distance = 2  # distance between each layer
 
     # Others
     layer_thickness = 7  # thickness of each layer
 
-    cycloid = CycloidalDrive(pin_radius, pin_base_radius, pin_count, contraction, pin_cycloid_tolerance,
-                             roller_pin_count, roller_pin_radius, roller_pin_tolerance,
+    cycloid = CycloidalDrive(pin_radius, pin_base_radius, pin_count, supported_pins, contraction, pin_cycloid_tolerance,
+                             extra_cycloids, cycloid_spacer_thickness, roller_pin_count, roller_pin_radius, roller_pin_tolerance,
                              bearing_outer, bearing_inner, bearing_outer_tolerance, bearing_inner_tolerance,
-                             layer_thickness)
+                             layer_thickness, inter_layer_distance)
 
     cycloid.export_everything('R2010', '../cycloidal_drive_sketches.dxf')
 
