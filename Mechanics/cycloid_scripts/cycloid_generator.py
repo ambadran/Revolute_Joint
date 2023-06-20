@@ -830,8 +830,8 @@ if __name__ == '__main__':
     # Inter-Layer Object: Eccentric Shaft
     bearing_outer = 32  # diameter
     bearing_inner = 20  # diameter
-    bearing_outer_tolerance = 0.2  # Less Plastic by making extra diameter for center hole of ball bearing in each layer
-    bearing_inner_tolerance = 0.15  # Extra plastic to the diameter of the eccentric shaft
+    bearing_outer_tolerance = 0.25  # Less Plastic by making extra diameter for center hole of ball bearing in each layer
+    bearing_inner_tolerance = 0.2  # Extra plastic to the diameter of the eccentric shaft
     inter_layer_distance = 2  # distance between each layer
 
     # Others
