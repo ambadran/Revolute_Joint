@@ -13,17 +13,20 @@ class Motor:
         self.dir.off()  # start as default cw value which is 0
         
         self.enable = Pin(13, Pin.OUT)
-        self.enable.off()
+        # self.enable.off()
+        self.enable.on()
 
         self.cw_value = False
         self.ccw_value = True
 
     def on(self):
-        self.enable.on()
+        # self.enable.on()
+        self.enable.off()
         self.step.duty_u16(32628)
 
     def off(self):
-        self.enable.off()
+        # self.enable.off()
+        self.enable.on()
         self.step.duty_u16(0)
 
     def freq(self, frequency):

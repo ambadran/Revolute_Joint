@@ -1,0 +1,16 @@
+"Id";"Designator";"Package";"Quantity";"Designation";"Supplier and ref";
+1;"QN8,QN2,QN3,QN10,QN1,QN7,QN9,QN4,QN12,QN5,QN11,QN6";"TO-92_Inline";12;"S8050";;;
+2;"QM3,QM1,QM2,QM4";"TO-220-3_Vertical";4;"IRF540N";;;
+3;"D2,D1";"D_DO-41_SOD81_P10.16mm_Horizontal";2;"1N5819";;;
+4;"CT2,CT4,CT3,CT1";"CP_Radial_D5.0mm_P2.50mm";4;"10uF";;;
+5;"R2,R9,R11,R12,R5,R3,RT2,R8,R6";"R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal";9;"1k";;;
+6;"C2,C1";"C_Disc_D5.0mm_W2.5mm_P2.50mm";2;"100nF";;;
+7;"LogicInput2,LogicInput3,LogicInput1,LogicInput4";"PinHeader_1x01_P2.54mm_Vertical";4;"Conn_01x01_Female";;;
+8;"CP1";"CP_Radial_D10.0mm_P5.00mm";1;"C_Polarized";;;
+9;"C_p1";"C_Disc_D5.0mm_W2.5mm_P2.50mm";1;"100pF";;;
+10;"DZ1";"D_DO-34_SOD68_P7.62mm_Horizontal";1;"12.1v";;;
+11;"QP3,QP4,QP1,QP2";"TO-92_Inline";4;"S8550";;;
+12;"DP4,DP1,DP3,DP2";"D_DO-27_P12.70mm_Horizontal";4;"SR360";;;
+13;"R7,R4,R10,R1,RT1";"R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal";5;"10k";;;
+14;"PowerInput1,Output1,LogicPowerInput1";"TerminalBlock_bornier-2_P5.08mm";3;"Conn_01x02_Female";;;
+15;"U1";"DIP-8_W7.62mm";1;"NE555P";;;
