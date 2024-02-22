@@ -1,99 +1,166 @@
-from machine import Pin, I2C
+from machine import I2C,Pin
+from micropython import const
+from ustruct import unpack, pack
+from collections import namedtuple
+from time import sleep
 
-i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=400_00)
+AS5600_id = const(0x36)  #Device ID
+m12 = const((1<<12)-1)  #0xFFF
+
+
+
+REGS=namedtuple('REGS','ZMCO ZPOS MPOS MANG CONF RAWANGLE ANGLE  STATUS AGC MAGNITUDE BURN')
+r = REGS(0,1,3,5,7,0xc,0xe,0xb,0x1a,0x1b,0xff)
+    
+#You cant overwrite __attribute__ in micropython but you can use Descriptors
+class RegDescriptor:
+    "Read and write a bit field from a register"
+    
+    def __init__(self,reg,shift,mask,buffsize=2):
+        "initialise with specific identifiers for the bit field"
+
+        self.reg = reg
+        self.shift = shift
+        self.mask = mask
+        self.buffsize = buffsize
+        self.writeable = (r.ZMCO,r.ZPOS,r.MPOS,r.MANG,r.CONF,r.BURN)
+        #NB the I2c object and the device name come from the main class via an object
+        
+    def get_register(self,obj):
+        "Read an I2C register"
+        #cache those registers with values that will not change.
+        #Dont bother caching bit fields.
+        if self.reg in obj.cache:  
+             return obj.cache[self.reg]
+            
+        #print ('reading now the actual device now')
+            
+        buff = obj.i2c.readfrom_mem(obj.device,self.reg,self.buffsize)
+  
+
+        if self.buffsize == 2:
+            v = unpack(">H",buff)[0]  #2 bytes big endian
+        else:
+            v = unpack(">B",buff)[0]
+        
+            
+        #cache writeable values since they are the ones that will not change in useage    
+        if self.reg in self.writeable:
+            obj.cache[self.reg] = v
+            
+        return v
+        
+    def __get__(self,obj,objtype):
+        "Get the register then extract the bit field"
+        v = self.get_register(obj)
+        if self.reg == 11:
+            print(self.reg,self.shift,self.mask)
+        v >>= self.shift
+        v &= self.mask
+        return v
+    
+    def __set__(self,obj,value):
+        "Insert a new value into the bit field of the old value then write it back"
+        if not self.reg in self.writeable:
+            raise AttributeError('Register is not writable')
+        oldvalue = self.get_register(obj)
+        #oldvalue <<= self.shift # get_register() does a shift, so we have to shift it back
+        insertmask = 0xffff - (self.mask << self.shift) #make a mask for a hole
+        oldvalue &= insertmask # AND a hole in the old value
+        value &= self.mask # mask our new value in case it is too big
+        value <<= self.shift
+        oldvalue |= value  # OR the new value back into the hole
+        if self.buffsize == 2:
+            buff = pack(">H",oldvalue)
+        else:
+            buff = pack(">B",oldvalue)
+            
+        obj.i2c.writeto_mem(obj.device,self.reg,buff) # write result back to the AS5600
+        
+        #must write the new value into the cache
+        self.cache[self.reg] = oldvalue
+        
+  
 
 class AS5600:
-    '''
-    Instance to interface AS5600 module through micropython REPL
-    '''
-    ### AS5600 Module addresses ###
-    MODULE = 0x36
-    registers = { 'ZMCO': 0x00, 'ZPOS0': 0x01, 'ZPOS1': 0x02, 
-            'MPOS0': 0x03, 'MPOS1': 0x04, 'MANG0': 0x05, 'MANG1': 0x06, 
-            'CONF0': 0x07, 'CONF1': 0x08, 'RAW_ANGLE0': 0x0C, 'RAW_ANGLE1': 0x0D, 
-            'ANGLE0': 0x0E, 'ANGLE1': 0x0F, 'STATUS': 0x0B, 'AGC': 0x1A, 
-            'MAGNITUDE0': 0x1B, 'MAGNITUDE1': 0x1C, 'BURN': 0xFF }
-
-    bits = {'MH': (0x0B, 3), 'ML': (0x0B, 4), 'MD': (0x0B, 5)}
-
-    double_regs = {'ZPOS': 0x01, 'MPOS': 0x03, 'MANG': 0x05, 'CONF': 0x07, 
-            'RAW_ANGLE': 0x0C, 'ANGLE': 0x0E, 'MAGNITUDE': 0x1B }
-
-    def __init__(self):
-        '''
-        Initializing the module!
-        '''
-        pass
-
-    def read(self, register, num_bytes=1):
-        '''
-        :returns: byte_array
-        :return: byte value from entered register to wanted number of bytes
-        '''
-        return i2c.readfrom_mem(self.MODULE, register, num_bytes)
-
-    def write(self, register, value):
-        '''
-        writes to wanted register the value argument
-        '''
-        return i2c.writeto_mem(self.MODULE, register, chr(value))
-
-    def __getattr__(self, address):
-        '''
-        reads the wanted address from the module and returns it
-        '''
-        if address in self.registers:
-            return self.read(self.registers[address])[0]
-
-        elif address in self.bits:
-            # reg_val = self.read(self.bits[address][0])[0]
-            # print(reg_val, 'reg_val')
-            # print((1<< self.bits[address][1]), 'bit_checker')
-
-            # bit_test = reg_val & (1<< self.bits[address][1])
-            # print(bit_test, 'bit_test')
-
-            # print(bit_test >> self.bits[address][1], 'final')
-            
-            return (self.read(self.bits[address][0])[0] & (1<<self.bits[address][1])) >> self.bits[address][1]
-
-        elif address in self.double_regs:
-            reg_val = self.read(self.double_regs[address], num_bytes=2)
-            byte0 = reg_val[0]
-            byte1 = reg_val[1]
-            # double register values in as5600 are only 4bits from the second register
-            byte1 &= 0b00001111  # filtering whatever value in the higher 4-bits
-            byte_val = byte0<<8 | byte1
-
-            return byte_val
-
-        else:
-            raise KeyError('Unknown address')
-
-    def __setattr__(self, address, value):
-        '''
-        writes the wanted value to the address in the module
-        '''
-        if address in self.registers:
-            self.write(self.registers[address], value)
-
-        elif address in self.bits:
-            reg_val = self.read(self.bits[address][0])[0]
-            bit_order = self.bits[address][1]
-            if value:
-                reg_val |= (1<<bit_order)
-                
-            else:
-                reg_val &= ~(1<<bit_order)
-
-            self.write(self.bits[address][0], reg_val)
-
-        elif address in self.double_regs:
-            raise ValueError('Not implemented yet')
-
-        else:
-            raise KeyError('unknown address')
-
+    def __init__(self,i2c,device):
+        self.i2c = i2c
+        self.device = device
+        self.writeable =(r.ZMCO,r.ZPOS,r.MPOS,r.MANG,r.CONF,r.BURN)
+        self.cache = {} #cache register values
         
+    #Use descriptors to read and write a bit field from a register
+    #1. we read one or two bytes from i2c
+    #2. We shift the value so that the least significant bit is bit zero
+    #3. We mask off the bits required  (most values are 12 bits hence m12)
+    ZMCO=      RegDescriptor(r.ZMCO,shift=0,mask=3,buffsize=1) #2 bit
+    ZPOS=      RegDescriptor(r.ZPOS,0,m12) #zero position
+    MPOS=      RegDescriptor(r.MPOS,0,m12) #maximum position
+    MANG=      RegDescriptor(r.MANG,0,m12) #maximum angle (alternative to above)
+    #Dummy example how how to make friendlier duplicate names if you want to
+    #max_angle = RegDescriptor(r.MANG,0,m12) #maximum angle (alternative to above)
+    CONF=      RegDescriptor(r.CONF,0,(1<<14)-1) # this register has 14 bits (see below)
+    RAWANGLE=  RegDescriptor(r.RAWANGLE,0,m12) 
+    ANGLE   =  RegDescriptor(r.ANGLE,0,m12) #angle with various adjustments (see datasheet)
+    STATUS=    RegDescriptor(r.STATUS,0,m12) #basically strength of magnet
+    AGC=       RegDescriptor(r.AGC,0,0xF,1) #automatic gain control
+    MAGNITUDE= RegDescriptor(r.MAGNITUDE,0,m12) #? something to do with the CORDIC for atan RTFM
+    BURN=      RegDescriptor(r.BURN,0,0xF,1)
 
-as5600 = AS5600()
+    #Configuration bit fields
+    PM =      RegDescriptor(r.CONF,0,0x3) #2bits Power mode
+    HYST =    RegDescriptor(r.CONF,2,0x3) # hysteresis for smoothing out zero crossing
+    OUTS =    RegDescriptor(r.CONF,4,0x3) # HARDWARE output stage ie analog (low,high)  or PWM
+    PWMF =    RegDescriptor(r.CONF,6,0x3) #pwm frequency
+    SF =      RegDescriptor(r.CONF,8,0x3) #slow filter (?filters glitches harder) RTFM
+    FTH =     RegDescriptor(r.CONF,10,0x7) #3 bits fast filter threshold. RTFM
+    WD =      RegDescriptor(r.CONF,13,0x1) #1 bit watch dog - Kicks into low power mode if nothing changes
+    
+    #status bit fields. ?having problems getting these to make sense
+    MH =      RegDescriptor(r.STATUS,3,0x1,1) #2bits  Magnet too strong (high)
+    ML =      RegDescriptor(r.STATUS,4,0x1,1) #2bits  Magnet too weak (low)
+    MD =      RegDescriptor(r.STATUS,5,0x1,1) #2bits  Magnet detected
+    
+    def scan(self):
+        "Debug utility function to check your i2c bus"
+        devices = self.i2c.scan()
+        print(devices)
+        if AS5600_id in devices:
+            print('Found AS5600 (id =',hex(AS5600_id),')')
+        print(self.CONF)
+        
+    def burn_angle(self):
+        "Burn ZPOS and MPOS -(can only do this 3 times)"
+        self.BURN = 0x80
+        
+    def burn_setting(self):
+        "Burn config and mang- (can only do this once)"
+        self.BURN = 0x40
+    
+    def magnet_status(self):
+        s = "Magnet "
+       # print(self.MD)
+        return
+        if self.MD == 1:
+            s += " detected"
+        else:
+            s += " not detected"
+        
+            
+        if self.ML == 1:
+            s+ " (magnet too weak)"
+            
+        if self.MH == 1:
+            s+ " (magnet too strong)"
+        return s
+                  
+
+i2c = I2C(0, scl=Pin(13), sda=Pin(12), freq=400000)
+  
+z = AS5600(i2c,AS5600_id)
+
+
+def show_angle():   
+    while True:
+        print(f"Angle: {z.ANGLE}", ' \r', end='')
+
